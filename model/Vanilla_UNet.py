@@ -60,16 +60,19 @@ class Encoder(nn.Module):
         return x, route_connection
     
 class Decoder(nn.Module):
-    def __init__(self, in_channels, out_channels, num_class, padding, size=4):
+    def __init__(self, in_channels, out_channels, num_class, padding, size=4, start_out_channels=32):
         super().__init__()
         self.decoder_layers = nn.ModuleList()
         self.padding = padding
 
-        for _ in range(size):
+        route_channels = [start_out_channels * (2**i) for i in range(size+1)][::-1]
+
+        for i in range(size):
             # Use conv transpose for upsampling
             self.decoder_layers.append(nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2))
-            self.decoder_layers.append(MultiCNNBlock(in_channels, out_channels, padding, n_conv=2))
-            in_channels //= 2
+            multi_in = out_channels + route_channels[i]
+            self.decoder_layers.append(MultiCNNBlock(multi_in, out_channels, padding, n_conv=2))
+            in_channels = out_channels
             out_channels //= 2
 
         # Use normal conv to remove bn and activation function
@@ -96,7 +99,7 @@ class VanillaUNet(nn.Module):
         super().__init__()
         self.encoder = Encoder(in_channels, start_out_channels, padding=padding, size=size)
         self.decoder = Decoder(start_out_channels*(2**size), start_out_channels*(2**(size-1)),\
-            num_class, padding=padding, size=size)
+            num_class, padding=padding, size=size, start_out_channels=start_out_channels)
         
     def forward(self, x):
         x, route_connection = self.encoder(x)
