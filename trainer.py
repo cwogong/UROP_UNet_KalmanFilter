@@ -6,6 +6,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset, random_split, Subset, Dataset
 import numpy as np
 from torchvision import transforms
+import torchvision.transforms.functional as TF
 from model.Vanilla_UNet import VanillaUNet
 from dataset.uav_dataset import UAVTrackingDataset
 import os
@@ -17,8 +18,9 @@ def load_config(path):
 
 
 class SegmentationPairDataset(Dataset):
-    def __init__(self, base_dataset):
+    def __init__(self, base_dataset, image_size=None):
         self.base_dataset = base_dataset
+        self.image_size = image_size
 
     def __len__(self):
         return len(self.base_dataset)
@@ -26,6 +28,10 @@ class SegmentationPairDataset(Dataset):
     def __getitem__(self, idx):
         image, targets = self.base_dataset[idx]
         mask = targets['mask'].float().unsqueeze(0) / 255.0
+
+        if self.image_size is not None:
+            mask = TF.resize(mask, self.image_size, interpolation=TF.InterpolationMode.NEAREST)
+
         return image, mask
 
 
@@ -92,7 +98,7 @@ def main():
     else:
         print(f'Loaded dataset size: {len(raw_dataset)} samples')
 
-    train_ds = SegmentationPairDataset(raw_dataset)
+    train_ds = SegmentationPairDataset(raw_dataset, image_size=image_size)
 
     # train/val split
     val_frac = 0.2

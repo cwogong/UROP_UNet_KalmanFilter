@@ -1,7 +1,7 @@
 dataset:
   root: /home/20213103/Datasets/ANTI_UAV_RGBT/Masked_SAM2
   root_mask: /home/20213103/Datasets/ANTI_UAV_RGBT/Masked_SAM2
-  num_workers: 4
+  num_workers: 0
   batch_size: 16
   image_size: [480, 480]
   train_sequences: 4
