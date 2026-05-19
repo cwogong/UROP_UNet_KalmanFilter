@@ -1,0 +1,12 @@
+{
+  "save_path": "checkpoints\\demo_unet.pth",
+  "best_epoch": 1,
+  "best_val_loss": 0.5057442605495452,
+  "epochs": 1,
+  "train_loss": [
+    0.5751761063933373
+  ],
+  "val_loss": [
+    0.5057442605495452
+  ]
+}

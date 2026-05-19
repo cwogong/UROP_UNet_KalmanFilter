@@ -134,32 +134,58 @@ class UAVTrackingDataset(Dataset):
         
         return np.array(boxes, dtype=np.float32)
     
+    def _get_sequence_dirs(self, root):
+        """루트 디렉토리에서 시퀀스 경로를 찾음
+
+        지원 구조:
+            root/<seq>/infrared/*.jpg
+            root/<split>/<seq>/infrared/*.jpg
+        """
+        seq_dirs = []
+        for entry in sorted(os.listdir(root)):
+            entry_path = os.path.join(root, entry)
+            if not os.path.isdir(entry_path):
+                continue
+
+            # 상위 레벨이 바로 시퀀스 폴더인 경우
+            if self._has_valid_sequence_dir(entry_path):
+                seq_dirs.append(entry)
+                continue
+
+            # 상위 레벨이 split(train/val/test)인 경우
+            for seq in sorted(os.listdir(entry_path)):
+                seq_path = os.path.join(entry_path, seq)
+                if os.path.isdir(seq_path) and self._has_valid_sequence_dir(seq_path):
+                    seq_dirs.append(os.path.join(entry, seq))
+
+        return seq_dirs
+
+    def _has_valid_sequence_dir(self, path):
+        """infrared/visible 하위 폴더가 있는지 검사"""
+        return all(os.path.isdir(os.path.join(path, img_type)) for img_type in ['infrared', 'visible'])
+
     def _get_file_paths(self, root, root_mask, num_sequences=None):
         """이미지와 마스크 경로 매칭"""
         image_list, mask_list = [], []
         seq_count = 0
-        
-        for seq in sorted(os.listdir(root)):
-            seq_path = os.path.join(root, seq)
-            if not os.path.isdir(seq_path):
-                continue
-            
-            # infrared, visible 두 스트림 모두 로드
+
+        seq_dirs = self._get_sequence_dirs(root)
+
+        for seq in seq_dirs:
             for img_type in ['infrared', 'visible']:
                 image_pattern = os.path.join(root, seq, img_type, '*.jpg')
                 mask_pattern = os.path.join(root_mask, seq, img_type, '*.png')
-                
+
                 image_list += sorted(glob(image_pattern))
                 mask_list += sorted(glob(mask_pattern))
-            
+
             seq_count += 1
             if num_sequences is not None and seq_count >= num_sequences:
                 break
-        
-        # 이미지와 마스크 개수 일치 확인
+
         assert len(image_list) == len(mask_list), \
             f'Image ({len(image_list)}) and mask ({len(mask_list)}) count mismatch!'
-        
+
         return image_list, mask_list
 
 
@@ -248,29 +274,27 @@ class UAVSequenceDataset(Dataset):
         image_list, mask_list = [], []
         seq_count = 0
         
-        for seq in sorted(os.listdir(root)):
-            seq_path = os.path.join(root, seq)
-            if not os.path.isdir(seq_path):
-                continue
-            
+        seq_dirs = self._get_sequence_dirs(root)
+
+        for seq in seq_dirs:
             for img_type in ['infrared', 'visible']:
                 image_pattern = os.path.join(root, seq, img_type, '*.jpg')
                 mask_pattern = os.path.join(root_mask, seq, img_type, '*.png')
-                
+
                 image_list += sorted(glob(image_pattern))
                 mask_list += sorted(glob(mask_pattern))
-            
+
             seq_count += 1
             if num_sequences is not None and seq_count >= num_sequences:
                 break
-        
+
         assert len(image_list) == len(mask_list)
-        
+
         # 시퀀스 시작 인덱스 생성
         seq_indices = []
         for i in range(len(image_list) - sequence_length + 1):
             seq_indices.append(i)
-        
+
         return image_list, mask_list, seq_indices
 
 
