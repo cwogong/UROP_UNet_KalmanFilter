@@ -81,7 +81,7 @@ smoothed_masks = model.process_sequence(frames)
 
 1. 의존성 설치:
    ```bash
-   pip install torch torchvision numpy matplotlib torchinfo
+   pip install -r requirements.txt
    ```
 
 2. 모델 테스트:
