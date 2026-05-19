@@ -3,16 +3,30 @@ import yaml
 import json
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset, random_split
+from torch.utils.data import DataLoader, TensorDataset, random_split, Subset, Dataset
 import numpy as np
+from torchvision import transforms
 from model.Vanilla_UNet import VanillaUNet
-from experiments.phase2_test import create_synthetic_frame_sequence
+from dataset.uav_dataset import UAVTrackingDataset
 import os
 
 
 def load_config(path):
     with open(path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
+
+
+class SegmentationPairDataset(Dataset):
+    def __init__(self, base_dataset):
+        self.base_dataset = base_dataset
+
+    def __len__(self):
+        return len(self.base_dataset)
+
+    def __getitem__(self, idx):
+        image, targets = self.base_dataset[idx]
+        mask = targets['mask'].float().unsqueeze(0) / 255.0
+        return image, mask
 
 
 def frames_to_dataset(frames, masks):
@@ -27,38 +41,80 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', default='config.yaml')
     parser.add_argument('--epochs', type=int, default=5)
-    parser.add_argument('--batch-size', type=int, default=4)
+    parser.add_argument('--batch-size', type=int, default=None)
     parser.add_argument('--lr', type=float, default=None)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     parser.add_argument('--save-dir', default='checkpoints')
+    parser.add_argument('--num-sequences', type=int, default=None,
+                        help='Use only the first N sequences from the dataset')
+    parser.add_argument('--max-samples', type=int, default=None,
+                        help='Limit training to this many image-mask pairs')
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     trainer_cfg = cfg.get('trainer', {})
     model_cfg = cfg.get('model', {})
+    dataset_cfg = cfg.get('dataset', {})
 
     lr = args.lr if args.lr is not None else trainer_cfg.get('lr', 1e-4)
+    batch_size = args.batch_size if args.batch_size is not None else dataset_cfg.get('batch_size', 4)
+    num_sequences = args.num_sequences if args.num_sequences is not None else dataset_cfg.get('train_sequences', None)
+    max_samples = args.max_samples
+
+    data_root = dataset_cfg.get('root')
+    mask_root = dataset_cfg.get('root_mask')
+    image_size = tuple(dataset_cfg.get('image_size', [480, 480]))
+
+    if data_root is None or mask_root is None:
+        raise ValueError('dataset.root and dataset.root_mask must be defined in config.yaml')
 
     device = torch.device(args.device)
 
     print('Using device:', device)
 
-    # 데이터: 합성 데이터 생성 (빠른 데모용)
-    print('Generating synthetic dataset (demo)...')
-    frames, masks, _ = create_synthetic_frame_sequence(num_frames=100, image_size=480)
-    ds = frames_to_dataset(frames, masks)
+    # 실제 데이터셋 로드
+    print('Loading dataset from:', data_root)
+    transform = transforms.Compose([
+        transforms.Resize(image_size),
+        transforms.ToTensor(),
+    ])
+
+    raw_dataset = UAVTrackingDataset(
+        data_root,
+        mask_root,
+        transforms=transform,
+        num_sequences=num_sequences
+    )
+
+    if max_samples is not None and max_samples < len(raw_dataset):
+        raw_dataset = Subset(raw_dataset, list(range(max_samples)))
+        print(f'Using subset of dataset: {len(raw_dataset)} samples')
+    else:
+        print(f'Loaded dataset size: {len(raw_dataset)} samples')
+
+    train_ds = SegmentationPairDataset(raw_dataset)
 
     # train/val split
     val_frac = 0.2
-    val_size = int(len(ds) * val_frac)
-    train_size = len(ds) - val_size
+    val_size = int(len(train_ds) * val_frac)
+    train_size = len(train_ds) - val_size
     if val_size > 0:
-        train_ds, val_ds = random_split(ds, [train_size, val_size])
+        train_ds, val_ds = random_split(train_ds, [train_size, val_size])
     else:
-        train_ds, val_ds = ds, None
+        train_ds, val_ds = train_ds, None
 
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=0) if val_ds is not None else None
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=dataset_cfg.get('num_workers', 0)
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=dataset_cfg.get('num_workers', 0)
+    ) if val_ds is not None else None
 
     # 모델
     unet_config = {
