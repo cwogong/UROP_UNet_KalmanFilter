@@ -164,6 +164,39 @@ class UAVTrackingDataset(Dataset):
         """infrared/visible 하위 폴더가 있는지 검사"""
         return all(os.path.isdir(os.path.join(path, img_type)) for img_type in ['infrared', 'visible'])
 
+    def _is_image_file(self, path):
+        name = os.path.basename(path).lower()
+        ext = os.path.splitext(name)[1]
+        return ext in ['.jpg', '.jpeg', '.png'] and '-mask' not in name and '_mask' not in name
+
+    def _is_mask_file(self, path):
+        name = os.path.basename(path).lower()
+        ext = os.path.splitext(name)[1]
+        return ext in ['.jpg', '.jpeg', '.png'] and ('-mask' in name or '_mask' in name)
+
+    def _file_key(self, path):
+        name = os.path.basename(path)
+        base, _ = os.path.splitext(name)
+        if base.endswith('-mask'):
+            base = base[:-5]
+        elif base.endswith('_mask'):
+            base = base[:-5]
+        return base
+
+    def _pair_files(self, image_files, mask_files):
+        mask_map = {self._file_key(m): m for m in mask_files}
+        paired_images, paired_masks = [], []
+
+        for img in sorted(image_files):
+            key = self._file_key(img)
+            mask_path = mask_map.get(key)
+            if mask_path is None:
+                continue
+            paired_images.append(img)
+            paired_masks.append(mask_path)
+
+        return paired_images, paired_masks
+
     def _get_file_paths(self, root, root_mask, num_sequences=None):
         """이미지와 마스크 경로 매칭"""
         image_list, mask_list = [], []
@@ -173,18 +206,32 @@ class UAVTrackingDataset(Dataset):
 
         for seq in seq_dirs:
             for img_type in ['infrared', 'visible']:
-                image_pattern = os.path.join(root, seq, img_type, '*.jpg')
-                mask_pattern = os.path.join(root_mask, seq, img_type, '*.png')
+                image_dir = os.path.join(root, seq, img_type)
+                mask_dir = os.path.join(root_mask, seq, img_type)
 
-                image_list += sorted(glob(image_pattern))
-                mask_list += sorted(glob(mask_pattern))
+                image_candidates = sorted(glob(os.path.join(image_dir, '*.*')))
+                mask_candidates = sorted(glob(os.path.join(mask_dir, '*.*')))
+
+                images = [p for p in image_candidates if self._is_image_file(p)]
+                masks = [p for p in mask_candidates if self._is_mask_file(p)]
+
+                paired_images, paired_masks = self._pair_files(images, masks)
+                image_list += paired_images
+                mask_list += paired_masks
 
             seq_count += 1
             if num_sequences is not None and seq_count >= num_sequences:
                 break
 
-        assert len(image_list) == len(mask_list), \
-            f'Image ({len(image_list)}) and mask ({len(mask_list)}) count mismatch!'
+        if len(image_list) != len(mask_list):
+            raise AssertionError(
+                f'Image ({len(image_list)}) and mask ({len(mask_list)}) count mismatch!\n'
+                f'  image_root={root}\n'
+                f'  mask_root={root_mask}\n'
+                f'  first_seq_dirs={seq_dirs[:5]}\n'
+                f'  sample_image_dir={os.path.join(root, seq_dirs[0], "infrared") if seq_dirs else "N/A"}\n'
+                f'  sample_mask_dir={os.path.join(root_mask, seq_dirs[0], "infrared") if seq_dirs else "N/A"}'
+            )
 
         return image_list, mask_list
 
@@ -269,6 +316,12 @@ class UAVSequenceDataset(Dataset):
         
         return np.array(centroids, dtype=np.float32)
     
+    def _glob_files(self, directory, extensions):
+        matches = []
+        for ext in extensions:
+            matches.extend(sorted(glob(os.path.join(directory, f'*{ext}'))))
+        return matches
+
     def _get_sequences(self, root, root_mask, sequence_length, num_sequences=None):
         """시퀀스 단위로 인덱스 구성"""
         image_list, mask_list = [], []
@@ -278,17 +331,24 @@ class UAVSequenceDataset(Dataset):
 
         for seq in seq_dirs:
             for img_type in ['infrared', 'visible']:
-                image_pattern = os.path.join(root, seq, img_type, '*.jpg')
-                mask_pattern = os.path.join(root_mask, seq, img_type, '*.png')
+                image_dir = os.path.join(root, seq, img_type)
+                mask_dir = os.path.join(root_mask, seq, img_type)
 
-                image_list += sorted(glob(image_pattern))
-                mask_list += sorted(glob(mask_pattern))
+                image_list += self._glob_files(image_dir, ['.jpg', '.png'])
+                mask_list += self._glob_files(mask_dir, ['.png', '.jpg'])
 
             seq_count += 1
             if num_sequences is not None and seq_count >= num_sequences:
                 break
 
-        assert len(image_list) == len(mask_list)
+        if len(image_list) != len(mask_list):
+            raise AssertionError(
+                f'Image ({len(image_list)}) and mask ({len(mask_list)}) count mismatch!\n'
+                f'  image_root={root}\n'
+                f'  mask_root={root_mask}\n'
+                f'  sample image_dir={os.path.join(root, seq_dirs[0], "infrared") if seq_dirs else "N/A"}\n'
+                f'  sample mask_dir={os.path.join(root_mask, seq_dirs[0], "infrared") if seq_dirs else "N/A"}'
+            )
 
         # 시퀀스 시작 인덱스 생성
         seq_indices = []
