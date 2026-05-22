@@ -32,6 +32,7 @@ trainer:
     test_path: checkpoints/best-test.pth
 
 model:
+  # 모델 선택: VanillaUNet 또는 UNetKalmanCombined
   name: VanillaUNet
   in_channels: 3
   start_out_channels: 32

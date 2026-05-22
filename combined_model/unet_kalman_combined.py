@@ -66,7 +66,7 @@ class UNetKalmanCombined(nn.Module):
         self.prev_center = None
         self.frame_count = 0
 
-    def forward(self, frame, use_kalman=True):
+    def forward(self, frame, use_kalman=True, return_logits=False):
         """
         프레임 단위 입력 처리 및 추적
         
@@ -84,21 +84,18 @@ class UNetKalmanCombined(nn.Module):
         Args:
             frame (torch.Tensor): 입력 프레임 (B, C, H, W), B=1 권장
             use_kalman (bool): Kalman Filter 사용 여부
+            return_logits (bool): True면 raw logits 반환
 
         Returns:
-            dict: 처리 결과
-                - 'smoothed_mask': 평활화된 마스크 (B, 1, H, W)
-                - 'raw_mask': 원본 마스크 (B, 1, H, W)
-                - 'center': 추출된 중심점 [x, y]
-                - 'kalman_center': Kalman 필터 예측 중심점 [x, y]
-                - 'filtered_center': 최종 추적 중심점 [x, y]
-                - 'bbox': 경계박스 (x1, y1, x2, y2)
+            dict or torch.Tensor: 처리 결과 또는 raw logits
         """
         self.frame_count += 1
         
         # 1. UNet으로 마스크 생성
-        raw_mask = self.unet(frame)  # (B, C, H, W)
-        raw_mask = torch.sigmoid(raw_mask)  # 확률로 변환
+        logits = self.unet(frame)  # (B, C, H, W)
+        if return_logits:
+            return logits
+        raw_mask = torch.sigmoid(logits)  # 확률로 변환
         
         # 배치 크기 1 권장
         B = frame.size(0)

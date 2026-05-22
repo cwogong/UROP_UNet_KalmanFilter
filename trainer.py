@@ -131,7 +131,29 @@ def main():
         'padding': model_cfg.get('padding', 1)
     }
 
-    model = VanillaUNet(**unet_config).to(device)
+    model_name = model_cfg.get('name', 'VanillaUNet')
+    if model_name == 'VanillaUNet':
+        model = VanillaUNet(**unet_config).to(device)
+    elif model_name == 'UNetKalmanCombined':
+        from combined_model.unet_kalman_combined import UNetKalmanCombined
+
+        kalman_cfg = cfg.get('kalman', {})
+        x0 = np.array(kalman_cfg.get('x0', [0., 0., 0., 0.]), dtype=np.float32)
+        kalman_config = {
+            'dt': kalman_cfg.get('dt', 1.0),
+            'x0': x0,
+            'Q': np.eye(4, dtype=np.float32) * kalman_cfg.get('process_noise', 0.01),
+            'R': np.eye(2, dtype=np.float32) * kalman_cfg.get('measurement_noise', 0.5),
+            'P': np.eye(4, dtype=np.float32) * kalman_cfg.get('initial_covariance', 100.0)
+        }
+        model = UNetKalmanCombined(
+            unet_config,
+            kalman_config=kalman_config,
+            kalman_name=kalman_cfg.get('type', 'linear')
+        ).to(device)
+    else:
+        raise ValueError(f"Unknown model name '{model_name}' in config.yaml")
+
     criterion = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
@@ -153,7 +175,10 @@ def main():
             yb = yb.to(device)
 
             optimizer.zero_grad()
-            preds = model(xb)  # (B, 1, H, W)
+            if model_cfg.get('name', 'VanillaUNet') == 'UNetKalmanCombined':
+                preds = model(xb, use_kalman=False, return_logits=True)
+            else:
+                preds = model(xb)
             loss = criterion(preds, yb)
             loss.backward()
             optimizer.step()
@@ -172,7 +197,10 @@ def main():
                 for xb, yb in val_loader:
                     xb = xb.to(device)
                     yb = yb.to(device)
-                    preds = model(xb)
+                    if model_cfg.get('name', 'VanillaUNet') == 'UNetKalmanCombined':
+                        preds = model(xb, use_kalman=False, return_logits=True)
+                    else:
+                        preds = model(xb)
                     loss = criterion(preds, yb)
                     val_running += loss.item() * xb.size(0)
 
