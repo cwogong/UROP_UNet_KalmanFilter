@@ -22,8 +22,8 @@ class UNetKalmanCombined(nn.Module):
     - 다중 객체 추적 (구현 가능)
     """
 
-    def __init__(self, unet_config, kalman_config, mask_threshold=0.5, 
-                 use_morphology=True, morphology_kernel_size=5):
+    def __init__(self, unet_config, kalman_config=None, kalman_class=None, kalman_name=None,
+                 mask_threshold=0.5, use_morphology=True, morphology_kernel_size=5):
         """
         Args:
             unet_config (dict): UNet 모델 설정
@@ -44,7 +44,17 @@ class UNetKalmanCombined(nn.Module):
         """
         super(UNetKalmanCombined, self).__init__()
         self.unet = VanillaUNet(**unet_config)
-        self.kalman = KalmanFilter(**kalman_config)
+
+        # Kalman 필터 주입(플러그인) 지원
+        # 우선순위: kalman_class (callable) > kalman_name (str) > 기본 Linear Kalman
+        if kalman_class is not None:
+            self.kalman = kalman_class(**(kalman_config or {}))
+        else:
+            if kalman_name is not None:
+                kalman_cls = self._get_kalman_class_by_name(kalman_name)
+            else:
+                kalman_cls = KalmanFilter
+            self.kalman = kalman_cls(**(kalman_config or {}))
         
         # 마스크 처리 파라미터
         self.mask_threshold = mask_threshold
@@ -323,6 +333,26 @@ class UNetKalmanCombined(nn.Module):
     def get_kalman_state(self):
         """Kalman Filter 현재 상태 반환"""
         return self.kalman.get_state()
+
+    @staticmethod
+    def _get_kalman_class_by_name(name: str):
+        """이름으로 칼만 필터 클래스를 로드합니다.
+
+        현재 지원되는 이름:
+        - 'linear' : filters.linear_kalman_filter.KalmanFilter
+
+        향후 'ekf', 'ukf' 등을 같은 방식으로 추가하세요.
+        """
+        if name is None:
+            return KalmanFilter
+
+        n = name.lower()
+        if n in ('linear', 'linear_kalman', 'kf'):
+            from filters.linear_kalman_filter import KalmanFilter as LinearKF
+            return LinearKF
+
+        # 알 수 없는 필터
+        raise ValueError(f'Unknown kalman filter name: {name}')
 
     def set_kalman_state(self, state):
         """Kalman Filter 상태 설정"""

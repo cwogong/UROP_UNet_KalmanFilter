@@ -41,5 +41,9 @@ model:
 
 kalman:
   # Kalman filter settings
-  process_noise: 0.1
-  measurement_noise: 0.1
+  # type: 'linear' (default) — 나중에 'ekf', 'ukf' 등으로 확장 가능
+  type: linear
+  dt: 1.0
+  x0: [240, 240, 0, 0]
+  process_noise: 0.01
+  measurement_noise: 0.5
