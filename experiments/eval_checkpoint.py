@@ -9,6 +9,7 @@ Outputs: prints mean BCE, IoU, Dice and saves results to experiments/eval_result
 
 import argparse
 import json
+import sys
 from pathlib import Path
 import yaml
 import torch
@@ -17,6 +18,11 @@ import numpy as np
 from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
 import torchvision.transforms.functional as TF
+
+# 프로젝트 루트 경로를 sys.path에 추가해 experiments 폴더에서도 import가 되도록 함
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+
 from dataset.uav_dataset import UAVTrackingDataset
 from model.Vanilla_UNet import VanillaUNet
 
