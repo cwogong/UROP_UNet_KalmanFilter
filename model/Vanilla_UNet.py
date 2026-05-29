@@ -115,7 +115,7 @@ if __name__ == '__main__':
         start_out_channels=64,
         num_class=1,
         size=4,
-        padding=1)
+        padding=0)
     print(summary(model, input_data=x, col_width=20, depth=5, 
                   row_settings=["depth", "var_names"], 
                   col_names=["input_size", "kernel_size", "output_size", "params_percent"]))
