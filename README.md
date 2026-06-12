@@ -77,6 +77,43 @@ frames = [torch.randn(1, 3, 480, 480) for _ in range(10)]
 smoothed_masks = model.process_sequence(frames)
 ```
 
+## Phase 3: 평가 및 최적화
+
+### 평가 지표
+- **mIoU**: 세그멘테이션 품질
+- **Dice Score**: F1 기반 마스크 정확도
+- **CLE** (Center Location Error): 위치 정확도 (pixels)
+- **Jitter**: 추적 안정성 (낮을수록 안정)
+- **Detection Rate**: 추적 연속성
+- **Smoothness Ratio**: 평활도 개선 비율 (>1이면 Kalman이 효과적)
+
+### 실행 방법
+
+```bash
+# 전체 Phase 3 평가 (합성 데이터, GPU 불필요)
+python eval/run_phase3.py
+
+# 개별 실행
+python eval/evaluate.py --mode synthetic --num-frames 100
+python eval/evaluate.py --mode tuning --num-frames 100
+python eval/noise_sensitivity.py --num-frames 100 --motion circular
+
+# 체크포인트 기반 평가 (실제 UNet 사용)
+python eval/evaluate.py --mode checkpoint --checkpoint checkpoints/demo_unet.pth
+```
+
+### 출력 파일
+```
+eval/results/
+├── trajectory_comparison.png     # GT vs Raw vs Kalman 궤적
+├── position_timeseries.png       # X/Y 시계열 비교
+├── cle_comparison.png            # CLE 그래프
+├── qr_tuning_heatmap.png         # Q/R 파라미터 히트맵
+├── noise_sensitivity.png         # 노이즈 민감도
+├── miss_rate_analysis.png        # 검출 실패율 분석
+└── evaluation_summary.json       # 수치 요약
+```
+
 ## 설치 및 실행
 
 1. 의존성 설치:
