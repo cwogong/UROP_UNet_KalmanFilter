@@ -46,5 +46,5 @@ kalman:
   type: linear
   dt: 1.0
   x0: [240, 240, 0, 0]
-  process_noise: 0.01
+  process_noise: 1.0
   measurement_noise: 0.5
