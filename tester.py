@@ -136,21 +136,19 @@ def test_baseline(model, test_loader, device):
 
 
 def test_with_kalman(model, test_loader, kalman_cfg, device):
-    """UNet + Kalman Filter"""
+    """UNet + Kalman Filter (시퀀스 전환 감지 시 리셋)"""
     metrics = SequenceMetrics()
 
-    # Kalman Filter 초기화
-    x0 = np.array(kalman_cfg.get('x0', [240, 240, 0, 0]), dtype=np.float32)
-    Q_scale = kalman_cfg.get('process_noise', 0.01)
+    Q_scale = kalman_cfg.get('process_noise', 1.0)
     R_scale = kalman_cfg.get('measurement_noise', 0.5)
+    dt = kalman_cfg.get('dt', 1.0)
 
-    kf = KalmanFilter(
-        dt=kalman_cfg.get('dt', 1.0),
-        x0=x0,
-        Q=np.eye(4, dtype=np.float32) * Q_scale,
-        R=np.eye(2, dtype=np.float32) * R_scale,
-        P=np.eye(4, dtype=np.float32) * 100.0,
-    )
+    # 시퀀스 전환 감지 임계값 (pixels)
+    # 연속 프레임에서 중심점이 이만큼 이상 점프하면 새 시퀀스로 판단
+    JUMP_THRESHOLD = 100.0
+
+    kf = None
+    prev_center = None
 
     with torch.no_grad():
         for images, masks_gt, centers_gt in tqdm(test_loader, desc='[Proposed] UNet + Kalman'):
@@ -169,11 +167,33 @@ def test_with_kalman(model, test_loader, kalman_cfg, device):
                 # UNet에서 중심점 추출
                 raw_center = extract_center_from_mask(pred_mask)
 
+                # 시퀀스 전환 감지 → Kalman 리셋
+                need_reset = False
+                if kf is None:
+                    need_reset = True
+                elif raw_center is not None and prev_center is not None:
+                    jump = np.linalg.norm(raw_center - prev_center)
+                    if jump > JUMP_THRESHOLD:
+                        need_reset = True
+
+                if need_reset:
+                    init_pos = raw_center if raw_center is not None else np.array([240.0, 240.0])
+                    x0 = np.array([init_pos[0], init_pos[1], 0.0, 0.0], dtype=np.float32)
+                    kf = KalmanFilter(
+                        dt=dt,
+                        x0=x0,
+                        Q=np.eye(4, dtype=np.float32) * Q_scale,
+                        R=np.eye(2, dtype=np.float32) * R_scale,
+                        P=np.eye(4, dtype=np.float32) * 100.0,
+                    )
+
                 # Kalman Filter 적용
                 kf.predict()
                 if raw_center is not None:
                     kf.update(raw_center)
                 kalman_center = kf.get_position()
+
+                prev_center = raw_center if raw_center is not None else prev_center
 
                 metrics.update(
                     pred_mask=pred_mask,
