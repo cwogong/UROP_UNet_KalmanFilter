@@ -44,17 +44,25 @@ class TestPairDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         image, targets = self.base[idx]
         mask = targets['mask'].float().unsqueeze(0) / 255.0
-        centroids = targets['centroids']  # (N, 2)
+        centroids = targets['centroids']  # (N, 2) — 원본 해상도 기준
+
+        # 원본 마스크 크기 (centroid 스케일링용)
+        orig_h, orig_w = mask.shape[-2], mask.shape[-1]
+        target_h, target_w = self.image_size
 
         # 이미지가 텐서면 마스크 크기 맞추기
         if isinstance(image, torch.Tensor):
             c, h, w = image.shape
             if (h, w) != mask.shape[-2:]:
                 mask = TF.resize(mask, (h, w), interpolation=TF.InterpolationMode.NEAREST)
+                target_h, target_w = h, w
 
         # 첫 번째 객체의 중심점 (단일 객체 가정)
         if centroids.shape[0] > 0:
-            center = centroids[0]  # [x, y]
+            center = centroids[0].clone()  # [x, y]
+            # 원본 해상도 → 타겟 해상도로 스케일링
+            center[0] = center[0] * target_w / orig_w  # x
+            center[1] = center[1] * target_h / orig_h  # y
         else:
             center = torch.tensor([0.0, 0.0])
 
@@ -110,8 +118,9 @@ def test_baseline(model, test_loader, device):
             for b in range(images.size(0)):
                 pred_mask = probs[b, 0].cpu().numpy()
                 gt_mask = masks_gt[b, 0].numpy()
-                gt_center = centers_gt[b].numpy()
 
+                # GT 중심점: resize된 마스크에서 직접 계산 (좌표 불일치 방지)
+                gt_center = extract_center_from_mask(gt_mask)
                 # 예측 중심점
                 pred_center = extract_center_from_mask(pred_mask)
 
@@ -153,7 +162,9 @@ def test_with_kalman(model, test_loader, kalman_cfg, device):
             for b in range(images.size(0)):
                 pred_mask = probs[b, 0].cpu().numpy()
                 gt_mask = masks_gt[b, 0].numpy()
-                gt_center = centers_gt[b].numpy()
+
+                # GT 중심점: resize된 마스크에서 직접 계산
+                gt_center = extract_center_from_mask(gt_mask)
 
                 # UNet에서 중심점 추출
                 raw_center = extract_center_from_mask(pred_mask)
