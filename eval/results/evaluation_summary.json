@@ -1,0 +1,101 @@
+{
+  "num_frames": 100,
+  "noise_level": 5.0,
+  "best_qr_params": {
+    "Q_scale": 1.0,
+    "R_scale": 10.0
+  },
+  "best_cle": 4.955502637369143,
+  "motion_results": {
+    "circular": {
+      "baseline": {
+        "mIoU": 0.7030407398939132,
+        "mean_dice": 0.8085324316038413,
+        "mean_CLE_raw": 6.082491775664191,
+        "mean_CLE_kalman": 6.082491775664191,
+        "CLE_improvement": 0.0,
+        "jitter_raw": 15.12818431854248,
+        "jitter_kalman": 15.12818431854248,
+        "jitter_reduction": 0.0,
+        "detection_rate_raw": 0.96,
+        "detection_rate_kalman": 0.96,
+        "max_gap_raw": 1,
+        "smoothness_ratio": 1.0
+      },
+      "kalman": {
+        "mIoU": 0.7030407398939132,
+        "mean_dice": 0.8085324316038413,
+        "mean_CLE_raw": 6.082491775664191,
+        "mean_CLE_kalman": 4.9636666680573605,
+        "CLE_improvement": 1.1188251076068303,
+        "jitter_raw": 15.12818431854248,
+        "jitter_kalman": 4.500373345348922,
+        "jitter_reduction": 70.25172844530967,
+        "detection_rate_raw": 0.96,
+        "detection_rate_kalman": 1.0,
+        "max_gap_raw": 1,
+        "smoothness_ratio": 3.36153984517246
+      }
+    },
+    "linear": {
+      "baseline": {
+        "mIoU": 0.7277318704128265,
+        "mean_dice": 0.8285564602381751,
+        "mean_CLE_raw": 5.952235891954186,
+        "mean_CLE_kalman": 5.952235891954186,
+        "CLE_improvement": 0.0,
+        "jitter_raw": 13.677465438842773,
+        "jitter_kalman": 13.677465438842773,
+        "jitter_reduction": 0.0,
+        "detection_rate_raw": 0.97,
+        "detection_rate_kalman": 0.97,
+        "max_gap_raw": 1,
+        "smoothness_ratio": 1.0
+      },
+      "kalman": {
+        "mIoU": 0.7277318704128265,
+        "mean_dice": 0.8285564602381751,
+        "mean_CLE_raw": 5.952235891954186,
+        "mean_CLE_kalman": 4.198493676799526,
+        "CLE_improvement": 1.7537422151546602,
+        "jitter_raw": 13.677465438842773,
+        "jitter_kalman": 4.204189300786531,
+        "jitter_reduction": 69.26192702506705,
+        "detection_rate_raw": 0.97,
+        "detection_rate_kalman": 1.0,
+        "max_gap_raw": 1,
+        "smoothness_ratio": 3.253294383362794
+      }
+    },
+    "random_walk": {
+      "baseline": {
+        "mIoU": 0.6769937896728515,
+        "mean_dice": 0.783498605422102,
+        "mean_CLE_raw": 6.925537137275047,
+        "mean_CLE_kalman": 6.925537137275047,
+        "CLE_improvement": 0.0,
+        "jitter_raw": 18.704288482666016,
+        "jitter_kalman": 18.704288482666016,
+        "jitter_reduction": 0.0,
+        "detection_rate_raw": 0.94,
+        "detection_rate_kalman": 0.94,
+        "max_gap_raw": 2,
+        "smoothness_ratio": 1.0
+      },
+      "kalman": {
+        "mIoU": 0.6769937896728515,
+        "mean_dice": 0.783498605422102,
+        "mean_CLE_raw": 6.925537137275047,
+        "mean_CLE_kalman": 5.271028652408291,
+        "CLE_improvement": 1.6545084848667555,
+        "jitter_raw": 18.704288482666016,
+        "jitter_kalman": 5.947208636189165,
+        "jitter_reduction": 68.20403701257561,
+        "detection_rate_raw": 0.94,
+        "detection_rate_kalman": 1.0,
+        "max_gap_raw": 2,
+        "smoothness_ratio": 3.1450533564350107
+      }
+    }
+  }
+}

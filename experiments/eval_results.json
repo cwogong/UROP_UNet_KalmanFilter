@@ -1,0 +1,7 @@
+{
+  "checkpoint": "checkpoints/demo_unet.pth",
+  "num_samples": 2000,
+  "mean_bce_per_pixel": 0.10139502363416884,
+  "mean_iou": 0.8913103787004948,
+  "mean_dice": 0.942025829821825
+}
