@@ -9,8 +9,8 @@
   "baseline": {
     "mIoU": 0.8661105857520807,
     "mean_dice": 0.9255549374140442,
-    "mean_CLE_raw": 508.8718793587606,
-    "mean_CLE_kalman": 508.8718793587606,
+    "mean_CLE_raw": 2.8781227328164602,
+    "mean_CLE_kalman": 2.8781227328164602,
     "CLE_improvement": 0.0,
     "jitter_raw": 3.6253602504730225,
     "jitter_kalman": 3.6253602504730225,
@@ -23,9 +23,9 @@
   "unet_kalman": {
     "mIoU": 0.8661105857520807,
     "mean_dice": 0.9255549374140442,
-    "mean_CLE_raw": 508.8718793587606,
-    "mean_CLE_kalman": 508.8846936955836,
-    "CLE_improvement": -0.012814336822998484,
+    "mean_CLE_raw": 2.8781227328164602,
+    "mean_CLE_kalman": 5.548738327388315,
+    "CLE_improvement": -2.6706155945718546,
     "jitter_raw": 3.6253602504730225,
     "jitter_kalman": 1.6646511974891816,
     "jitter_reduction": 54.08315069708453,
