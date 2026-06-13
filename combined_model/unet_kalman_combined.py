@@ -337,8 +337,9 @@ class UNetKalmanCombined(nn.Module):
 
         현재 지원되는 이름:
         - 'linear' : filters.linear_kalman_filter.KalmanFilter
+        - 'ekf'    : filters.extended_kalman_filter.ExtendedKalmanFilter
 
-        향후 'ekf', 'ukf' 등을 같은 방식으로 추가하세요.
+        향후 'ukf' 등을 같은 방식으로 추가하세요.
         """
         if name is None:
             return KalmanFilter
@@ -347,6 +348,9 @@ class UNetKalmanCombined(nn.Module):
         if n in ('linear', 'linear_kalman', 'kf'):
             from filters.linear_kalman_filter import KalmanFilter as LinearKF
             return LinearKF
+        elif n in ('ekf', 'extended', 'extended_kalman'):
+            from filters.extended_kalman_filter import ExtendedKalmanFilter
+            return ExtendedKalmanFilter
 
         # 알 수 없는 필터
         raise ValueError(f'Unknown kalman filter name: {name}')

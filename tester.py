@@ -29,6 +29,7 @@ import matplotlib.pyplot as plt
 from model.Vanilla_UNet import VanillaUNet
 from dataset.uav_dataset import UAVTrackingDataset
 from filters.linear_kalman_filter import KalmanFilter
+from filters.extended_kalman_filter import ExtendedKalmanFilter
 from eval.metrics import SequenceMetrics, compute_iou, compute_dice
 
 
@@ -206,6 +207,71 @@ def test_with_kalman(model, test_loader, kalman_cfg, device):
     return metrics.summarize()
 
 
+def test_with_ekf(model, test_loader, kalman_cfg, device):
+    """UNet + Extended Kalman Filter (CTRV 모션 모델)"""
+    metrics = SequenceMetrics()
+
+    Q_scale = kalman_cfg.get('process_noise', 0.1)
+    R_scale = kalman_cfg.get('measurement_noise', 0.5)
+    dt = kalman_cfg.get('dt', 1.0)
+
+    JUMP_THRESHOLD = 100.0
+
+    ekf = None
+    prev_center = None
+
+    with torch.no_grad():
+        for images, masks_gt, centers_gt in tqdm(test_loader, desc='[Proposed] UNet + EKF'):
+            images = images.to(device)
+
+            logits = model(images)
+            probs = torch.sigmoid(logits)
+
+            for b in range(images.size(0)):
+                pred_mask = probs[b, 0].cpu().numpy()
+                gt_mask = masks_gt[b, 0].numpy()
+                gt_center = extract_center_from_mask(gt_mask)
+                raw_center = extract_center_from_mask(pred_mask)
+
+                # 시퀀스 전환 감지 → EKF 리셋
+                need_reset = False
+                if ekf is None:
+                    need_reset = True
+                elif raw_center is not None and prev_center is not None:
+                    jump = np.linalg.norm(raw_center - prev_center)
+                    if jump > JUMP_THRESHOLD:
+                        need_reset = True
+
+                if need_reset:
+                    init_pos = raw_center if raw_center is not None else np.array([240.0, 240.0])
+                    x0 = np.array([init_pos[0], init_pos[1], 0.0, 0.0, 0.0])
+                    ekf = ExtendedKalmanFilter(
+                        dt=dt,
+                        x0=x0,
+                        Q=np.diag([Q_scale, Q_scale, Q_scale * 0.5, Q_scale * 0.1, Q_scale * 0.1]),
+                        R=np.eye(2) * R_scale,
+                        P=np.eye(5) * 100.0,
+                    )
+
+                # EKF 적용
+                ekf.predict()
+                if raw_center is not None:
+                    ekf.update(raw_center)
+                kalman_center = ekf.get_position()
+
+                prev_center = raw_center if raw_center is not None else prev_center
+
+                metrics.update(
+                    pred_mask=pred_mask,
+                    gt_mask=gt_mask,
+                    raw_center=raw_center,
+                    gt_center=gt_center,
+                    kalman_center=kalman_center,
+                )
+
+    return metrics.summarize()
+
+
 def plot_test_results(baseline_res, kalman_res, save_path):
     """테스트 결과 비교 바 차트"""
     metrics_to_plot = {
@@ -247,6 +313,15 @@ def main():
     parser.add_argument('--save-dir', default='eval/test_results')
     parser.add_argument('--save-vis', action='store_true',
                         help='시각화 결과 저장')
+    parser.add_argument('--sweep', action='store_true',
+                        help='다중 Q/R 값을 한번에 테스트')
+    parser.add_argument('--q-values', type=str, default='0.01,0.05,0.1,0.3,0.5,1.0',
+                        help='sweep 모드에서 테스트할 Q 값들 (쉼표 구분)')
+    parser.add_argument('--r-values', type=str, default=None,
+                        help='sweep 모드에서 테스트할 R 값들 (기본: config 값 사용)')
+    parser.add_argument('--filter', type=str, default='linear',
+                        choices=['linear', 'ekf', 'both'],
+                        help='사용할 필터 (linear, ekf, both)')
     args = parser.parse_args()
 
     # Config 로드
@@ -271,8 +346,6 @@ def main():
         transforms.ToTensor(),
     ])
 
-    # test 시퀀스만 로드 (train과 겹치지 않게 offset 사용)
-    # train_sequences + val_sequences 이후의 시퀀스를 test로 사용
     train_seq = dataset_cfg.get('train_sequences', 4)
     val_seq = dataset_cfg.get('val_sequences', 1)
     total_for_test = train_seq + val_seq + test_sequences
@@ -281,15 +354,12 @@ def main():
     print(f'  Root: {root}')
     print(f'  Test sequences: {test_sequences} (offset: {train_seq + val_seq})')
 
-    # 전체 데이터 로드 후 test 부분만 추출
     full_dataset = UAVTrackingDataset(
         root, root_mask,
         transforms=transform,
         num_sequences=total_for_test
     )
 
-    # train+val 이후의 데이터를 test로 사용
-    # train_sequences * frames_per_seq 만큼 offset
     total_samples = len(full_dataset)
     test_start = int(total_samples * (train_seq + val_seq) / total_for_test)
 
@@ -314,7 +384,12 @@ def main():
     # === 모델 로드 ===
     model, unet_config = load_model(args.checkpoint, model_cfg, device)
 
-    # === 평가 실행 ===
+    # === Sweep 모드: 다중 Q/R 테스트 ===
+    if args.sweep:
+        run_sweep(model, test_loader, device, kalman_cfg, args)
+        return
+
+    # === 단일 평가 실행 ===
     print(f'\n{"="*60}')
     print('Phase 3: 실제 테스트 데이터 평가')
     print(f'{"="*60}')
@@ -323,11 +398,197 @@ def main():
     print('\n[1/2] Baseline 평가 (UNet only)...')
     baseline_result = test_baseline(model, test_loader, device)
 
-    # 2. UNet + Kalman
-    print('\n[2/2] UNet + Kalman Filter 평가...')
-    kalman_result = test_with_kalman(model, test_loader, kalman_cfg, device)
+    # 2. UNet + Kalman (선형 또는 EKF)
+    results_to_save = {
+        'checkpoint': args.checkpoint,
+        'test_samples': len(test_ds),
+        'kalman_config': {
+            'Q': kalman_cfg.get('process_noise'),
+            'R': kalman_cfg.get('measurement_noise'),
+            'dt': kalman_cfg.get('dt'),
+        },
+        'baseline': baseline_result,
+    }
 
-    # === 결과 출력 ===
+    if args.filter in ('linear', 'both'):
+        print('\n[Linear KF] UNet + Linear Kalman Filter...')
+        lkf_result = test_with_kalman(model, test_loader, kalman_cfg, device)
+        results_to_save['linear_kalman'] = lkf_result
+        print_comparison(baseline_result, lkf_result)
+
+    if args.filter in ('ekf', 'both'):
+        print('\n[EKF] UNet + Extended Kalman Filter (CTRV)...')
+        ekf_result = test_with_ekf(model, test_loader, kalman_cfg, device)
+        results_to_save['ekf'] = ekf_result
+        print_comparison(baseline_result, ekf_result)
+
+    if args.filter == 'both':
+        # 3자 비교
+        print(f'\n{"="*80}')
+        print(f'{"지표":<20} {"Baseline":<12} {"Linear KF":<12} {"EKF (CTRV)":<12} {"LKF vs Base":<14} {"EKF vs Base":<14}')
+        print(f'{"-"*80}')
+        print(f'{"CLE (px)":<20} {baseline_result["mean_CLE_raw"]:<12.4f} '
+              f'{lkf_result["mean_CLE_kalman"]:<12.4f} {ekf_result["mean_CLE_kalman"]:<12.4f} '
+              f'{baseline_result["mean_CLE_raw"] - lkf_result["mean_CLE_kalman"]:+12.4f} '
+              f'{baseline_result["mean_CLE_raw"] - ekf_result["mean_CLE_kalman"]:+12.4f}')
+        print(f'{"Jitter":<20} {baseline_result["jitter_raw"]:<12.4f} '
+              f'{lkf_result["jitter_kalman"]:<12.4f} {ekf_result["jitter_kalman"]:<12.4f} '
+              f'{lkf_result["jitter_reduction"]:+12.1f}% '
+              f'{ekf_result["jitter_reduction"]:+12.1f}%')
+        print(f'{"Smoothness":<20} {"1.000":<12} '
+              f'{lkf_result["smoothness_ratio"]:<12.3f} {ekf_result["smoothness_ratio"]:<12.3f}')
+        print(f'{"-"*80}')
+
+    # === 결과 저장 ===
+    save_dir = Path(args.save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    results_path = save_dir / 'test_results.json'
+    with open(results_path, 'w', encoding='utf-8') as f:
+        json.dump(results_to_save, f, indent=2, ensure_ascii=False, default=str)
+    print(f'\n✓ 결과 저장: {results_path}')
+
+    if args.save_vis:
+        # 가장 마지막으로 테스트한 필터 결과로 시각화
+        last_result = ekf_result if args.filter in ('ekf', 'both') else lkf_result
+        plot_path = save_dir / 'test_comparison.png'
+        plot_test_results(baseline_result, last_result, plot_path)
+
+    print(f'\n{"="*60}')
+    print('✅ 평가 완료!')
+    print(f'{"="*60}')
+
+
+def run_sweep(model, test_loader, device, kalman_cfg, args):
+    """다중 Q/R 파라미터 sweep 테스트"""
+    save_dir = Path(args.save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    q_values = [float(x) for x in args.q_values.split(',')]
+    if args.r_values:
+        r_values = [float(x) for x in args.r_values.split(',')]
+    else:
+        r_values = [kalman_cfg.get('measurement_noise', 0.5)]
+
+    print(f'\n{"="*70}')
+    print(f'  Q/R Sweep 모드')
+    print(f'  Q values: {q_values}')
+    print(f'  R values: {r_values}')
+    print(f'{"="*70}')
+
+    # Baseline (한번만)
+    print('\n[Baseline] UNet Only...')
+    baseline_result = test_baseline(model, test_loader, device)
+
+    # 전체 결과 저장
+    all_results = []
+
+    print(f'\n{"Q":<8} {"R":<8} {"CLE":<10} {"ΔCLE":<10} {"Jitter":<10} {"Jit↓%":<10} {"Smooth":<10}')
+    print('-' * 66)
+
+    for q in q_values:
+        for r in r_values:
+            test_kalman_cfg = dict(kalman_cfg)
+            test_kalman_cfg['process_noise'] = q
+            test_kalman_cfg['measurement_noise'] = r
+
+            result = test_with_kalman(model, test_loader, test_kalman_cfg, device)
+
+            delta_cle = baseline_result['mean_CLE_raw'] - result['mean_CLE_kalman']
+
+            print(f'{q:<8.3f} {r:<8.3f} {result["mean_CLE_kalman"]:<10.4f} '
+                  f'{delta_cle:<+10.4f} {result["jitter_kalman"]:<10.4f} '
+                  f'{result["jitter_reduction"]:<10.1f} {result["smoothness_ratio"]:<10.3f}')
+
+            all_results.append({
+                'Q': q,
+                'R': r,
+                'CLE_kalman': result['mean_CLE_kalman'],
+                'CLE_delta': delta_cle,
+                'jitter_kalman': result['jitter_kalman'],
+                'jitter_reduction_pct': result['jitter_reduction'],
+                'smoothness_ratio': result['smoothness_ratio'],
+            })
+
+    # 결과 저장
+    sweep_output = {
+        'baseline': baseline_result,
+        'sweep_results': all_results,
+        'q_values': q_values,
+        'r_values': r_values,
+    }
+
+    sweep_path = save_dir / 'sweep_results.json'
+    with open(sweep_path, 'w', encoding='utf-8') as f:
+        json.dump(sweep_output, f, indent=2, ensure_ascii=False, default=str)
+
+    # Sweep 시각화
+    _plot_sweep(all_results, baseline_result, save_dir)
+
+    # 최적 파라미터 (CLE 최소 기준)
+    best = min(all_results, key=lambda x: x['CLE_kalman'])
+    print(f'\n{"="*70}')
+    print(f'📋 Sweep 결과 요약')
+    print(f'  최적 (CLE 기준): Q={best["Q"]}, R={best["R"]}, CLE={best["CLE_kalman"]:.4f}')
+
+    # 균형점 (CLE 증가 < 1px 중 jitter 감소 최대)
+    balanced = [r for r in all_results if r['CLE_delta'] > -1.0]
+    if balanced:
+        best_balanced = max(balanced, key=lambda x: x['jitter_reduction_pct'])
+        print(f'  최적 (균형): Q={best_balanced["Q"]}, R={best_balanced["R"]}, '
+              f'ΔCLE={best_balanced["CLE_delta"]:+.4f}, Jitter↓={best_balanced["jitter_reduction_pct"]:.1f}%')
+
+    print(f'\n✓ 저장: {sweep_path}')
+    print(f'{"="*70}')
+
+
+def _plot_sweep(all_results, baseline_result, save_dir):
+    """Sweep 결과 시각화"""
+    q_vals = [r['Q'] for r in all_results]
+    cle_vals = [r['CLE_kalman'] for r in all_results]
+    jitter_vals = [r['jitter_reduction_pct'] for r in all_results]
+
+    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+    # 1. CLE vs Q
+    axes[0].plot(q_vals, cle_vals, 'b-o', markersize=8)
+    axes[0].axhline(baseline_result['mean_CLE_raw'], color='r', linestyle='--',
+                   label=f'Baseline CLE={baseline_result["mean_CLE_raw"]:.2f}')
+    axes[0].set_xlabel('Q (Process Noise)')
+    axes[0].set_ylabel('CLE (pixels)')
+    axes[0].set_title('CLE vs Q')
+    axes[0].set_xscale('log')
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+
+    # 2. Jitter 감소율 vs Q
+    axes[1].plot(q_vals, jitter_vals, 'g-^', markersize=8)
+    axes[1].set_xlabel('Q (Process Noise)')
+    axes[1].set_ylabel('Jitter Reduction (%)')
+    axes[1].set_title('Jitter Reduction vs Q')
+    axes[1].set_xscale('log')
+    axes[1].grid(True, alpha=0.3)
+
+    # 3. Trade-off: CLE 증가 vs Jitter 감소
+    cle_deltas = [-r['CLE_delta'] for r in all_results]  # 양수 = 나빠진 것
+    axes[2].scatter(jitter_vals, cle_deltas, c=q_vals, cmap='viridis', s=100)
+    for i, r in enumerate(all_results):
+        axes[2].annotate(f'Q={r["Q"]}', (jitter_vals[i], cle_deltas[i]),
+                        textcoords='offset points', xytext=(5, 5), fontsize=8)
+    axes[2].set_xlabel('Jitter Reduction (%)')
+    axes[2].set_ylabel('CLE Increase (pixels)')
+    axes[2].set_title('Trade-off: CLE vs Jitter')
+    axes[2].axhline(0, color='k', linestyle='-', alpha=0.3)
+    axes[2].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(save_dir / 'sweep_tradeoff.png', dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f'✓ Sweep 시각화 저장: {save_dir / "sweep_tradeoff.png"}')
+
+
+def print_comparison(baseline_result, kalman_result):
+    """비교 결과 출력"""
     print(f'\n{"="*70}')
     print(f'{"지표":<25} {"UNet Only":<15} {"UNet+Kalman":<15} {"차이":<15}')
     print(f'{"-"*70}')
@@ -342,44 +603,6 @@ def main():
     print(f'{"Detection Rate":<25} {baseline_result["detection_rate_raw"]:<15.4f} {kalman_result["detection_rate_kalman"]:<15.4f}')
     print(f'{"Smoothness Ratio":<25} {"---":<15} {kalman_result["smoothness_ratio"]:<15.4f} {"(>1=개선)"}')
     print(f'{"-"*70}')
-
-    # === 결과 저장 ===
-    save_dir = Path(args.save_dir)
-    save_dir.mkdir(parents=True, exist_ok=True)
-
-    results = {
-        'checkpoint': args.checkpoint,
-        'test_samples': len(test_ds),
-        'kalman_config': {
-            'Q': kalman_cfg.get('process_noise'),
-            'R': kalman_cfg.get('measurement_noise'),
-            'dt': kalman_cfg.get('dt'),
-        },
-        'baseline': baseline_result,
-        'unet_kalman': kalman_result,
-    }
-
-    results_path = save_dir / 'test_results.json'
-    with open(results_path, 'w', encoding='utf-8') as f:
-        json.dump(results, f, indent=2, ensure_ascii=False, default=str)
-    print(f'\n✓ 결과 저장: {results_path}')
-
-    # 시각화
-    if args.save_vis:
-        plot_path = save_dir / 'test_comparison.png'
-        plot_test_results(baseline_result, kalman_result, plot_path)
-
-    # 최종 요약
-    print(f'\n{"="*60}')
-    cle_improvement = baseline_result['mean_CLE_raw'] - kalman_result['mean_CLE_kalman']
-    if cle_improvement > 0:
-        print(f'✅ Kalman Filter가 위치 추적을 {cle_improvement:.2f}px 개선')
-    else:
-        print(f'⚠️ 현재 설정에서 Kalman Filter 효과 미미 (Q/R 튜닝 필요)')
-
-    print(f'   Jitter 감소: {kalman_result["jitter_reduction"]:.1f}%')
-    print(f'   Smoothness Ratio: {kalman_result["smoothness_ratio"]:.2f}')
-    print(f'{"="*60}')
 
 
 if __name__ == '__main__':
