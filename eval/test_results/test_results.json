@@ -20,7 +20,7 @@
     "max_gap_raw": 0,
     "smoothness_ratio": 1.0
   },
-  "unet_kalman": {
+  "linear_kalman": {
     "mIoU": 0.8661105857520807,
     "mean_dice": 0.9255549374140442,
     "mean_CLE_raw": 2.8781227328164602,
@@ -33,5 +33,19 @@
     "detection_rate_kalman": 1.0,
     "max_gap_raw": 0,
     "smoothness_ratio": 1.3164530598535538
+  },
+  "ekf": {
+    "mIoU": 0.8661105857520807,
+    "mean_dice": 0.9255549374140442,
+    "mean_CLE_raw": 2.8781227328164602,
+    "mean_CLE_kalman": 5.3053296641846295,
+    "CLE_improvement": -2.4272069313681692,
+    "jitter_raw": 3.6253602504730225,
+    "jitter_kalman": 10.507921788026724,
+    "jitter_reduction": -189.844899349553,
+    "detection_rate_raw": 1.0,
+    "detection_rate_kalman": 1.0,
+    "max_gap_raw": 0,
+    "smoothness_ratio": 0.34501210835085844
   }
 }
