@@ -38,14 +38,14 @@
     "mIoU": 0.8661105857520807,
     "mean_dice": 0.9255549374140442,
     "mean_CLE_raw": 2.8781227328164602,
-    "mean_CLE_kalman": 5.3053296641846295,
-    "CLE_improvement": -2.4272069313681692,
+    "mean_CLE_kalman": 3.2711712462301805,
+    "CLE_improvement": -0.39304851341372027,
     "jitter_raw": 3.6253602504730225,
-    "jitter_kalman": 10.507921788026724,
-    "jitter_reduction": -189.844899349553,
+    "jitter_kalman": 3.3528381003304926,
+    "jitter_reduction": 7.517105351261623,
     "detection_rate_raw": 1.0,
     "detection_rate_kalman": 1.0,
     "max_gap_raw": 0,
-    "smoothness_ratio": 0.34501210835085844
+    "smoothness_ratio": 1.0812810347495356
   }
 }
