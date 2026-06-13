@@ -30,6 +30,7 @@ from model.Vanilla_UNet import VanillaUNet
 from dataset.uav_dataset import UAVTrackingDataset
 from filters.linear_kalman_filter import KalmanFilter
 from filters.extended_kalman_filter import ExtendedKalmanFilter
+from filters.constant_acceleration_filter import ConstantAccelerationFilter
 from eval.metrics import SequenceMetrics, compute_iou, compute_dice
 
 
@@ -272,6 +273,74 @@ def test_with_ekf(model, test_loader, kalman_cfg, device):
     return metrics.summarize()
 
 
+    return metrics.summarize()
+
+
+def test_with_ca(model, test_loader, kalman_cfg, device):
+    """UNet + Constant Acceleration Filter"""
+    metrics = SequenceMetrics()
+
+    Q_scale = kalman_cfg.get('process_noise', 0.3)
+    R_scale = kalman_cfg.get('measurement_noise', 0.5)
+    dt = kalman_cfg.get('dt', 1.0)
+
+    JUMP_THRESHOLD = 100.0
+
+    ca = None
+    prev_center = None
+
+    with torch.no_grad():
+        for images, masks_gt, centers_gt in tqdm(test_loader, desc='[Proposed] UNet + CA'):
+            images = images.to(device)
+
+            logits = model(images)
+            probs = torch.sigmoid(logits)
+
+            for b in range(images.size(0)):
+                pred_mask = probs[b, 0].cpu().numpy()
+                gt_mask = masks_gt[b, 0].numpy()
+                gt_center = extract_center_from_mask(gt_mask)
+                raw_center = extract_center_from_mask(pred_mask)
+
+                # 시퀀스 전환 감지
+                need_reset = False
+                if ca is None:
+                    need_reset = True
+                elif raw_center is not None and prev_center is not None:
+                    jump = np.linalg.norm(raw_center - prev_center)
+                    if jump > JUMP_THRESHOLD:
+                        need_reset = True
+
+                if need_reset:
+                    init_pos = raw_center if raw_center is not None else np.array([240.0, 240.0])
+                    x0 = np.array([init_pos[0], init_pos[1], 0.0, 0.0, 0.0, 0.0])
+                    ca = ConstantAccelerationFilter(
+                        dt=dt,
+                        x0=x0,
+                        Q=Q_scale,
+                        R=np.eye(2) * R_scale,
+                        P=100.0,
+                    )
+
+                # CA Filter 적용
+                ca.predict()
+                if raw_center is not None:
+                    ca.update(raw_center)
+                kalman_center = ca.get_position()
+
+                prev_center = raw_center if raw_center is not None else prev_center
+
+                metrics.update(
+                    pred_mask=pred_mask,
+                    gt_mask=gt_mask,
+                    raw_center=raw_center,
+                    gt_center=gt_center,
+                    kalman_center=kalman_center,
+                )
+
+    return metrics.summarize()
+
+
 def plot_test_results(baseline_res, kalman_res, save_path):
     """테스트 결과 비교 바 차트"""
     metrics_to_plot = {
@@ -320,8 +389,8 @@ def main():
     parser.add_argument('--r-values', type=str, default=None,
                         help='sweep 모드에서 테스트할 R 값들 (기본: config 값 사용)')
     parser.add_argument('--filter', type=str, default='linear',
-                        choices=['linear', 'ekf', 'both'],
-                        help='사용할 필터 (linear, ekf, both)')
+                        choices=['linear', 'ekf', 'ca', 'all'],
+                        help='사용할 필터 (linear, ekf, ca, all)')
     args = parser.parse_args()
 
     # Config 로드
@@ -410,34 +479,46 @@ def main():
         'baseline': baseline_result,
     }
 
-    if args.filter in ('linear', 'both'):
+    if args.filter in ('linear', 'all'):
         print('\n[Linear KF] UNet + Linear Kalman Filter...')
         lkf_result = test_with_kalman(model, test_loader, kalman_cfg, device)
         results_to_save['linear_kalman'] = lkf_result
         print_comparison(baseline_result, lkf_result)
 
-    if args.filter in ('ekf', 'both'):
+    if args.filter in ('ekf', 'all'):
         print('\n[EKF] UNet + Extended Kalman Filter (CTRV)...')
         ekf_result = test_with_ekf(model, test_loader, kalman_cfg, device)
         results_to_save['ekf'] = ekf_result
         print_comparison(baseline_result, ekf_result)
 
-    if args.filter == 'both':
-        # 3자 비교
-        print(f'\n{"="*80}')
-        print(f'{"지표":<20} {"Baseline":<12} {"Linear KF":<12} {"EKF (CTRV)":<12} {"LKF vs Base":<14} {"EKF vs Base":<14}')
-        print(f'{"-"*80}')
-        print(f'{"CLE (px)":<20} {baseline_result["mean_CLE_raw"]:<12.4f} '
-              f'{lkf_result["mean_CLE_kalman"]:<12.4f} {ekf_result["mean_CLE_kalman"]:<12.4f} '
-              f'{baseline_result["mean_CLE_raw"] - lkf_result["mean_CLE_kalman"]:+12.4f} '
-              f'{baseline_result["mean_CLE_raw"] - ekf_result["mean_CLE_kalman"]:+12.4f}')
-        print(f'{"Jitter":<20} {baseline_result["jitter_raw"]:<12.4f} '
-              f'{lkf_result["jitter_kalman"]:<12.4f} {ekf_result["jitter_kalman"]:<12.4f} '
-              f'{lkf_result["jitter_reduction"]:+12.1f}% '
-              f'{ekf_result["jitter_reduction"]:+12.1f}%')
-        print(f'{"Smoothness":<20} {"1.000":<12} '
-              f'{lkf_result["smoothness_ratio"]:<12.3f} {ekf_result["smoothness_ratio"]:<12.3f}')
-        print(f'{"-"*80}')
+    if args.filter in ('ca', 'all'):
+        print('\n[CA] UNet + Constant Acceleration Filter...')
+        ca_result = test_with_ca(model, test_loader, kalman_cfg, device)
+        results_to_save['ca'] = ca_result
+        print_comparison(baseline_result, ca_result)
+
+    if args.filter == 'all':
+        # 4자 비교
+        print(f'\n{"="*90}')
+        print(f'{"지표":<18} {"Baseline":<12} {"Linear(CV)":<12} {"CA":<12} {"EKF(CTRV)":<12} ')
+        print(f'{"-"*90}')
+        print(f'{"CLE (px)":<18} {baseline_result["mean_CLE_raw"]:<12.4f} '
+              f'{lkf_result["mean_CLE_kalman"]:<12.4f} '
+              f'{ca_result["mean_CLE_kalman"]:<12.4f} '
+              f'{ekf_result["mean_CLE_kalman"]:<12.4f}')
+        print(f'{"Jitter":<18} {baseline_result["jitter_raw"]:<12.4f} '
+              f'{lkf_result["jitter_kalman"]:<12.4f} '
+              f'{ca_result["jitter_kalman"]:<12.4f} '
+              f'{ekf_result["jitter_kalman"]:<12.4f}')
+        print(f'{"Jitter↓%":<18} {"---":<12} '
+              f'{lkf_result["jitter_reduction"]:<12.1f} '
+              f'{ca_result["jitter_reduction"]:<12.1f} '
+              f'{ekf_result["jitter_reduction"]:<12.1f}')
+        print(f'{"Smoothness":<18} {"1.000":<12} '
+              f'{lkf_result["smoothness_ratio"]:<12.3f} '
+              f'{ca_result["smoothness_ratio"]:<12.3f} '
+              f'{ekf_result["smoothness_ratio"]:<12.3f}')
+        print(f'{"-"*90}')
 
     # === 결과 저장 ===
     save_dir = Path(args.save_dir)
@@ -450,7 +531,14 @@ def main():
 
     if args.save_vis:
         # 가장 마지막으로 테스트한 필터 결과로 시각화
-        last_result = ekf_result if args.filter in ('ekf', 'both') else lkf_result
+        if args.filter == 'all':
+            last_result = ca_result
+        elif args.filter == 'ca':
+            last_result = ca_result
+        elif args.filter == 'ekf':
+            last_result = ekf_result
+        else:
+            last_result = lkf_result
         plot_path = save_dir / 'test_comparison.png'
         plot_test_results(baseline_result, last_result, plot_path)
 
