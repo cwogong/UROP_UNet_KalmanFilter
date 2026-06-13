@@ -1,3 +1,31 @@
+# Python
 __pycache__/
 *.pyc
 *.pyd
+*.pyo
+
+# 체크포인트 (용량 큼, git-lfs 사용하지 않는 한 제외)
+checkpoints/
+checkpoints_light/
+
+# 실험 결과 (재현 가능하므로 제외)
+eval/results/
+eval/test_results/
+experiments/phase2_results/
+experiments/*.png
+experiments/eval_results.json
+
+# Archive (정리용)
+_archive/
+
+# IDE / OS
+.ipynb_checkpoints/
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
+
+# 보고서 생성 임시
+UROP_보고서.docx
+generate_report.py

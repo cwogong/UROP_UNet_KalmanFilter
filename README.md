@@ -1,127 +1,110 @@
-# UROP_UNet_KalmanFilter
+# Anti-UAV Tracking: UNet + Kalman Filter
 
-UAV 객체 추적을 위한 UNet과 Kalman Filter의 통합 프로젝트
+UAV 객체 추적을 위한 UNet 세그멘테이션과 칼만 필터 통합 시스템.
 
 ## 프로젝트 구조
 
 ```
 UROP_UNet_KalmanFilter/
-├── combined_model/
-│   └── unet_kalman_combined.py  # UNet + Kalman Filter 통합 모델
-├── dataset/
-│   └── uav_dataset.py           # UAV 데이터셋
-├── filters/
-│   └── linear_kalman_filter.py  # 2D 선형 Kalman Filter
 ├── model/
-│   ├── UNet_center.py           # (미구현)
-│   └── Vanilla_UNet.py          # Vanilla UNet 구현
+│   ├── Vanilla_UNet.py                # UNet 세그멘테이션 네트워크
+│   └── UNet_center.py                 # UNet + 중심점 추출
+├── filters/
+│   ├── linear_kalman_filter.py        # 선형 KF (Constant Velocity)
+│   ├── constant_acceleration_filter.py # CA 필터 (Constant Acceleration)
+│   └── extended_kalman_filter.py      # EKF (CTRV 모션 모델)
+├── combined_model/
+│   ├── unet_kalman_combined.py        # UNet + Kalman 통합 파이프라인
+│   └── mask_utils.py                  # 마스크 처리/시각화 유틸리티
+├── dataset/
+│   └── uav_dataset.py                 # ANTI-UAV 데이터셋 로더
+├── eval/
+│   ├── metrics.py                     # 평가 지표 (IoU, Dice, CLE, Jitter)
+│   ├── evaluate.py                    # 합성 데이터 평가 + Q/R 튜닝
+│   ├── noise_sensitivity.py           # 노이즈 민감도 분석
+│   └── run_phase3.py                  # Phase 3 전체 파이프라인
 ├── experiments/
-│   └── phase1_test.py           # Phase 1 테스트
-└── config.yaml                  # 설정 파일
+│   ├── phase1_test.py                 # Kalman Filter 단독 테스트
+│   ├── phase2_test.py                 # UNet+Kalman 통합 테스트
+│   └── eval_checkpoint.py             # 체크포인트 평가
+├── trainer.py                         # 학습 (tqdm + 실시간 커브 시각화)
+├── tester.py                          # 테스트 (필터 비교, Q sweep)
+├── config.yaml                        # 기본 설정 (channels=32, depth=4)
+├── config_light.yaml                  # 경량 설정 (channels=16, depth=3)
+└── requirements.txt                   # 의존성
 ```
 
-## Phase 2: 통합 (1-2주)
-
-### 2.1 UNet + Kalman Filter 통합 아키텍처
-
-- **프레임 단위 입력 처리**
-  - UNet: 현재 프레임 → 객체 마스크 생성
-  - Kalman Filter: 이전 프레임의 마스크 정보 → 현재 프레임 예측
-
-- **데이터 흐름**
-  ```
-  입력 프레임
-  ↓
-  [UNet] → 객체 마스크
-  ↓
-  [Kalman Filter] → 평활화된 마스크
-  ↓
-  출력
-  ```
-
-### 2.2 시간 축 정보 활용
-
-- 연속 프레임에서 마스크의 움직임 추적
-- Kalman Filter로 노이즈 제거 및 예측
-
-## 통합 모델 사용법
-
-```python
-from combined_model.unet_kalman_combined import UNetKalmanCombined
-import torch
-import numpy as np
-
-# 설정
-unet_config = {
-    'in_channels': 3,
-    'start_out_channels': 32,
-    'num_class': 1,
-    'size': 4,
-    'padding': 1
-}
-
-kalman_config = {
-    'dt': 1.0,
-    'x0': np.array([240, 240, 0, 0]),  # 초기 중심점
-}
-
-# 모델 생성
-model = UNetKalmanCombined(unet_config, kalman_config)
-
-# 단일 프레임 처리
-frame = torch.randn(1, 3, 480, 480)
-smoothed_mask = model(frame)
-
-# 시퀀스 처리
-frames = [torch.randn(1, 3, 480, 480) for _ in range(10)]
-smoothed_masks = model.process_sequence(frames)
-```
-
-## Phase 3: 평가 및 최적화
-
-### 평가 지표
-- **mIoU**: 세그멘테이션 품질
-- **Dice Score**: F1 기반 마스크 정확도
-- **CLE** (Center Location Error): 위치 정확도 (pixels)
-- **Jitter**: 추적 안정성 (낮을수록 안정)
-- **Detection Rate**: 추적 연속성
-- **Smoothness Ratio**: 평활도 개선 비율 (>1이면 Kalman이 효과적)
-
-### 실행 방법
+## 설치
 
 ```bash
-# 전체 Phase 3 평가 (합성 데이터, GPU 불필요)
+pip install -r requirements.txt
+```
+
+## 사용법
+
+### 학습
+
+```bash
+# 기본 UNet 학습
+python trainer.py --config config.yaml --epochs 50
+
+# 경량 UNet 학습
+python trainer.py --config config_light.yaml --epochs 50 --save-dir checkpoints_light
+```
+
+### 테스트 (필터 비교)
+
+```bash
+# Baseline vs Linear KF vs CA vs EKF 전체 비교
+python tester.py --checkpoint checkpoints/demo_unet.pth --filter all --save-vis
+
+# Linear KF만 테스트
+python tester.py --checkpoint checkpoints/demo_unet.pth --filter linear
+
+# Q 파라미터 sweep (다중 Q 한번에 테스트)
+python tester.py --checkpoint checkpoints/demo_unet.pth --sweep --q-values "0.01,0.05,0.1,0.3,0.5,1.0"
+```
+
+### 합성 데이터 평가 (GPU 불필요)
+
+```bash
 python eval/run_phase3.py
-
-# 개별 실행
-python eval/evaluate.py --mode synthetic --num-frames 100
-python eval/evaluate.py --mode tuning --num-frames 100
-python eval/noise_sensitivity.py --num-frames 100 --motion circular
-
-# 체크포인트 기반 평가 (실제 UNet 사용)
-python eval/evaluate.py --mode checkpoint --checkpoint checkpoints/demo_unet.pth
+python eval/noise_sensitivity.py
 ```
 
-### 출력 파일
+## 핵심 결과
+
+| 방법 | CLE (px) ↓ | Jitter ↓ | Jitter 감소 | Smoothness ↑ |
+|------|-----------|----------|-------------|--------------|
+| Baseline (UNet only) | 2.88 | 3.63 | — | 1.00 |
+| **Linear KF (CV)** | 3.22 | **2.75** | **-24%** | **1.32** |
+| CA (등가속도) | 3.13 | 3.08 | -15% | 1.18 |
+| EKF (CTRV) | 3.27 | 3.35 | -7.5% | 1.08 |
+
+- 선형 칼만 필터(등속도 모델)가 종합 최적
+- 주된 기여: 추적 안정성(Jitter 감소), 위치 정확도 손실 최소
+
+## 설정 (config.yaml)
+
+```yaml
+model:
+  name: VanillaUNet
+  in_channels: 3
+  start_out_channels: 32
+  num_class: 1
+  size: 4
+  padding: 1
+
+kalman:
+  type: linear          # 'linear', 'ekf'
+  dt: 1.0
+  process_noise: 0.3    # Q (작을수록 평활화↑, CLE↑)
+  measurement_noise: 0.5 # R
 ```
-eval/results/
-├── trajectory_comparison.png     # GT vs Raw vs Kalman 궤적
-├── position_timeseries.png       # X/Y 시계열 비교
-├── cle_comparison.png            # CLE 그래프
-├── qr_tuning_heatmap.png         # Q/R 파라미터 히트맵
-├── noise_sensitivity.png         # 노이즈 민감도
-├── miss_rate_analysis.png        # 검출 실패율 분석
-└── evaluation_summary.json       # 수치 요약
-```
 
-## 설치 및 실행
+## 연구 단계
 
-1. 의존성 설치:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. 모델 테스트:
-   ```bash
-   python combined_model/unet_kalman_combined.py
-   ```
+- [x] Phase 1: 선형 Kalman Filter 구현 및 검증
+- [x] Phase 2: UNet + Kalman Filter 통합
+- [x] Phase 3: 성능 평가 (Baseline vs Kalman, Q/R 튜닝)
+- [x] Phase 4: EKF(CTRV), CA(등가속도) 모델 비교
