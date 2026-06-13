@@ -248,9 +248,9 @@ def test_with_ekf(model, test_loader, kalman_cfg, device):
                     ekf = ExtendedKalmanFilter(
                         dt=dt,
                         x0=x0,
-                        Q=np.diag([Q_scale, Q_scale, Q_scale * 0.5, Q_scale * 0.1, Q_scale * 0.1]),
+                        Q=np.diag([Q_scale * 2, Q_scale * 2, Q_scale, Q_scale * 5, Q_scale * 5]),
                         R=np.eye(2) * R_scale,
-                        P=np.eye(5) * 100.0,
+                        P=np.eye(5) * 10.0,
                     )
 
                 # EKF 적용
