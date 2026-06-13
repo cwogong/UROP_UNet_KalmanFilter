@@ -2,7 +2,7 @@
   "checkpoint": "checkpoints/demo_unet.pth",
   "test_samples": 1708,
   "kalman_config": {
-    "Q": 1.0,
+    "Q": 0.1,
     "R": 0.5,
     "dt": 1.0
   },
@@ -24,14 +24,14 @@
     "mIoU": 0.8661105857520807,
     "mean_dice": 0.9255549374140442,
     "mean_CLE_raw": 2.8781227328164602,
-    "mean_CLE_kalman": 2.981296480576062,
-    "CLE_improvement": -0.10317374775960175,
+    "mean_CLE_kalman": 3.6704944396520336,
+    "CLE_improvement": -0.7923717068355733,
     "jitter_raw": 3.6253602504730225,
-    "jitter_kalman": 3.119245670288171,
-    "jitter_reduction": 13.960394107669059,
+    "jitter_kalman": 2.398495902999965,
+    "jitter_reduction": 33.84117051343695,
     "detection_rate_raw": 1.0,
     "detection_rate_kalman": 1.0,
     "max_gap_raw": 0,
-    "smoothness_ratio": 1.1622554404758039
+    "smoothness_ratio": 1.511514047590631
   }
 }
