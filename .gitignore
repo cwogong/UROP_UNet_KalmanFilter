@@ -25,7 +25,3 @@ _archive/
 *.swp
 Thumbs.db
 .DS_Store
-
-# 보고서 생성 임시
-UROP_보고서.docx
-generate_report.py
