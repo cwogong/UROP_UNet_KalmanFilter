@@ -47,5 +47,19 @@
     "detection_rate_kalman": 1.0,
     "max_gap_raw": 0,
     "smoothness_ratio": 1.0812810347495356
+  },
+  "ca": {
+    "mIoU": 0.8661105857520807,
+    "mean_dice": 0.9255549374140442,
+    "mean_CLE_raw": 2.8781227328164602,
+    "mean_CLE_kalman": 3.125185266556264,
+    "CLE_improvement": -0.24706253373980358,
+    "jitter_raw": 3.6253602504730225,
+    "jitter_kalman": 3.0830258920170253,
+    "jitter_reduction": 14.95946111532749,
+    "detection_rate_raw": 1.0,
+    "detection_rate_kalman": 1.0,
+    "max_gap_raw": 0,
+    "smoothness_ratio": 1.1759097644493615
   }
 }
